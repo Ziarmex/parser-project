@@ -1,0 +1,9 @@
+# Build artifacts
+bin/
+*.o
+
+# Editor / IDE
+.idea/
+
+# Generated output (created by --mpfy)
+/Z.mp

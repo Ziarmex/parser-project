@@ -1,0 +1,406 @@
+Langage C et Sécurité — Projet
+Écriture d’un parser d’images Mini-PNG
+Basé sur une idée originale d’Olivier Levillain, modifié par Cyrille Chavet, puis par
+Camille Monière
+Responsable : Camille MONIÈRE
+Intervenant : Camille MONIÈRE, Josselin SIMION
+2026–2027
+Table des matières
+1 Introduction 2
+1.1 Objectifs et règles . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 2
+1.2 Informations relatives à l’évaluation . . . . . . . . . . . . . . . . . . . . . 3
+2 Description du format Mini-PNG 6
+2.1 Structure générale d’un bloc . . . . . . . . . . . . . . . . . . . . . . . . . . 6
+2.2 Bloc en-tête H . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+2.3 Bloc commentaire C . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 7
+2.4 Bloc de données D . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 8
+2.5 Exemple de résultat pour une image “noir et blanc” . . . . . . . . . . . . 9
+3 Étapes 10
+3.1 Lire un fichier Mini-PNG . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 10
+3.1.1 Q1 : Analyseur Mini-PNG (parser) . . . . . . . . . . . . . . . . . . . 10
+3.1.2 Q2 : Analyse avancée . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+3.1.3 Q3 : Vérification . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+3.2 Afficher et écrire un Mini-PNG Noir et Blanc . . . . . . . . . . . . . . . . . 11
+3.2.1 Q4 : Affichage . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+3.2.2 Q5 : Écriture . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 11
+3.2.3 Q6 : Génération . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 12
+3.3 Prise en charge des niveaux de gris . . . . . . . . . . . . . . . . . . . . . . 12
+3.3.1 Q7 : Support des niveaux de gris . . . . . . . . . . . . . . . . . . . . 12
+3.3.2 Q8 : Affichage et génération des niveaux de gris . . . . . . . . . . 12
+3.4 Prise en charge des true colors 24-bits . . . . . . . . . . . . . . . . . . . . . 13
+3.4.1 Q9 : Support des true colors 24-bits . . . . . . . . . . . . . . . . . . 13
+3.4.2 Q10 : Affichage et génération des true colors 24-bits . . . . . . . . 13
+3.5 Prise en charge de palette 256 couleurs (difficile) . . . . . . . . . . . . . . 14
+3.5.1 Bloc de palette P . . . . . . . . . . . . . . . . . . . . . . . . . . . . . . 14
+3.5.2 Q11 : Prise en charge de l’encodage 256-couleurs . . . . . . . . . 14
+3.5.3 Q12 : Affichage 256-couleurs et palette externe . . . . . . . . . . . 15
+3.6 Prise en charge de la sérialisation (très difficile) . . . . . . . . . . . . . . 15
+3.6.1 Q13 : Affichage sérialisé . . . . . . . . . . . . . . . . . . . . . . . . . 15
+1
+Partie 1
+Introduction
+1.1 Objectifs et règles
+L’objectif principal de ce miniprojet est d’écrire un parser (analyseur syntaxique)
+d’images Mini-PNG, une version simplifiée du format d’images standard PNG1.
+Les fonctionnalités attendues du programme consistent en trois fonctionnalités
+principales de base et deux plus avancées :
+1. Parser d’images noir et blanc Mini-PNG ;
+2. Affichage et génération d’images ;
+3. Gestion des images en niveaux de gris ;
+4. Gestion des images en couleurs ;
+5. Gestion de palette 256-couleurs.
+Les objectifs du miniprojet sont les suivants :
+• analyser et évaluer le standard Mini-PNG, ses faiblesses et ses risques ;
+• concevoir puis implémenter un parser d’images Mini-PNG en noir et blanc, en
+suivant le format décrit dans la partie 2 ;
+• implémenter l’affichage des images lues ;
+• concevoir puis implémenter un générateur d’ASCII Mini-PNG correct ;
+• implémenter la gestion des images en niveaux de gris ;
+◦ implémenter la gestion des images en couleurs ;
+◦ implémenter la gestion de palette 256 couleurs ;
+? assurer la portabilité2 du programme.
+Les points indiqués par un disque noir “•” correspondent au minimum attendu.
+Ceux indiqués par un cercle blanc “◦” correspondent à un bon niveau. Le point
+identifié par une étoile noire “?” est plus complexe.
+1Défini dans la RFC 2083, lien sur Moodle
+2Entre architecture de processeur x86_64 et ARM d’abord, puis sur OS différent, etc.
+2
+En outre, vous devrez également respecter les trois règles suivantes :
+I - concevoir et développer en respectant les principes de sécurité, de sureté et
+de correction et en le prouvant ;
+II - pouvoir justifier ses choix d’implémentation ;
+III - permettre la reproductibilité de la compilation, des vérifications et tests.
+Au cours de ce miniprojet, votre programme doit au minimum répondre correc-
+tement aux exigences des cinq premières questions. Les trois questions suivantes
+(Q6 à Q8) correspondent au niveau moyen attendu. Pour les plus motivés d’entre
+vous, il sera possible d’aller plus loin et d’afficher une image en couleur, selon dif-
+férents modes, voir de sérialiser l’image. La portabilité multicible et multi-OS (en
+conservant la sureté, la sécurité et la correction) correspond au niveau le plus élevé.
+Le programme sera implémenté en langage C. Étant donné le sujet du cours, il
+vous est bien sûr demandé de penser au-delà du fonctionnel et de la performance et
+de la correction, et de proposer du code sûr, commenté et sécurisé, tout en utilisant
+les outils proposés.
+1.2 Informations relatives à l’évaluation
+Vous serez évaluer en partie sur le fonctionnement du programme final et sur le
+rapport que vous fournirez, et principalement au cours d’un oral individuel. Votre
+assiduité et votre ponctualité influent également sur la note.
+La note de miniprojet Npro (qui compte pour 2/3 de la note de l’UE) correspond
+au produit de la note sur le rendu Nrd (programme, rapport et oral) par la note
+de présence Nps (assiduité et ponctualité), c.-à-d. Npro = Nrd × Nps/20. La note de
+présence est individuelle, même lorsque le travail est réalisé en groupe.
+Note de présence
+Pour rappel, la présence en cours (et donc miniprojet) est obligatoire. L’intervenant
+notera la présence3. La note de présence Nps est comprise entre 0 et 20. Chacune des
+10 séances rapporte 2 points. Chaque retard fait perdre 1 point.
+Note de rendu
+Votre travail sera évalué à partir du programme que vous aurez produit, du rap-
+port où vous présenterez votre analyse du “standard” Mini-PNG et comment cela
+se traduit dans votre résultat et d’un oral présentant ce rapport.
+3En cas de problème majeur, contacter le responsable de l’UE.
+3
+Consignes supplémentaires
+# Concernant le programme #
+◦ Le programme lui-même :
+1. doit prendre la forme d’un unique exécutable (dont les fonctionnalités s’enri-
+chiront au fur et à mesure) ;
+2. doit prendre un nom de fichier en argument ;
+3. doit signaler une erreur par un code de retour non-nul et afficher, si possible,
+un message d’erreur explicite.
+◦ Les sources, en-têtes, makefile(s) et assimilés :
+1. doivent être commentés avec des commentaires utiles et corrects ;
+2. doivent être correctement formatés (voir man clang-format) ;
+3. doivent permettre de construire le programme sur RHEL 9 (Linux UBS).
+Ni le programme compilé, ni aucun fichier binaire ne doit être rendu. Seuls les
+sources (.c), les en-têtes (.h) et le(s) éventuel(s) makefile(s) sont à rendre. Il faudra
+les rassembler dans une archive .zip ou .tar.gz. Avec Git, cela revient à effec-
+tuer la commande “git archive -o ../archive.tar.gz HEAD” dans votre dé-
+pôt. Chaque fichier binaire superflu entraine le retrait de 5 points.
+# Concernant le rapport #
+1. doit être au format PDF, tout autre format donnera -20 points (c.-à-d. 0) ;
+2. doit mettre en évidence les problèmes ainsi que vos solutions sans contenir
+de ligne de code ;
+3. doit reporter les éventuels ajouts que vous avez pu faire en termes de sécurité,
+ainsi que leurs motivations ;
+4. doit documenter le comportement du programme.
+# Effectuer le rendu #
+Vous rendrez votre travail sur Moodle. Une item “Rendu de projet” sera présent
+dans la section TP/Projet. Vous y déposerez votre rapport PDF à coté de l’archive
+.zip ou .tar.gz4. Si le rapport est dans l’archive, -5 points.
+4Il arrive que Compilatio génère un message ”Erreur de l’envoi”, mais ce n’est pas un problème ;
+ignorez le message, le cas échéant.
+4
+# Modalités de l’oral #
+1. public : huis-clos ;
+2. Durées : 10 minutes de présentation, 10 minutes de questions ;
+3. Support(s) autorisé(s) : slides, notes ;
+4. Contenu : contexte, analyse du format Mini-PNG, solutions et prise de recul.
+Des barèmes d’évaluation sont (ou seront, le cas échéant) donnés à titre indicatif
+dans Moodle.
+5
+Partie 2
+Description du format Mini-PNG
+Une image au format Mini-PNG est constituée d’abord d’un marqueur de 8 octets
+(parfois appelé magic number) suivi d’une liste de blocs. Le magic number de Mini-
+PNG est simplement "Mini-PNG". La structure, les différents types de bloc et leurs
+spécificités sont décrits dans les sections suivantes.
+2.1 Structure générale d’un bloc
+Les blocs composant le fichier sont de la forme suivante :
+Offset Nom Taille Description
+0 Type 1 octet Caractère décrivant le bloc
+1 Taille λ 2 octets Valeur de λ, longueur en octets du contenu
+3 Contenu λ octets Contenu du bloc (dépend du type)
+Table 2.1 : Offset, nom, taille et description des champs composant les blocs.0 1 3
+Type Taille 𝜆 Contenu
+(1 octet) (2 octets) (𝜆 octets)
+Figure 2.1 : Structure des blocs.
+Comme indiqué dans le tableau 2.1, le contenu dépend du type de bloc. Les types
+classiques de bloc ainsi que la composition d’un Mini-PNG sont les suivants :
+• un bloc d’en-tête H (header) ;
+• zéro, un ou plusieurs blocs de commentaires C (comment) ;
+• un ou plusieurs blocs de données D (data).
+Les prochaines sections décrivent successivement chaque bloc.
+6
+2.2 Bloc en-tête H
+Le bloc H décris les dimensions et la catégorie d’image. Les différentes catégories
+d’image sont noir et blanc (NEB), niveaux de gris (NVG), palette 256 couleurs (P8C)
+et couleurs 24-bits (C24). Chaque catégorie est associée à un chiffre, soit :
+0 : NEB ; 1 : NVG ; 2 : C24 ; 3 : P8C.
+Le contenu du bloc H est décris dans le tableau 2.2 et la figure 2.2 ci-dessous.
+Offset Nom Taille Description
+0 Largeur 4 octets Largeur de l’image en pixels
+4 Hauteur 4 octets Hauteur de l’image en pixels
+8 Catégorie 1 octet Catégorie de l’image (0, 1, 2 ou 3)1
+Table 2.2 : Offset, nom, taille et description des champs composant les blocs H.0 4 8
+Largeur Hauteur Catégorie
+(4 octets) (4 octets) (1 octet)
+Figure 2.2 : Structure du contenu d’un bloc H.
+2.3 Bloc commentaire C
+Le bloc C contient une simple chaine de caractères affichables. Le contenu du bloc
+est décris dans le tableau 2.3 et la figure 2.3 ci-dessous.
+Offset Nom Taille Description
+0 Commentaires λ octets Contenu des commentaires du bloc
+Table 2.3 : Offset, nom, taille et description des champs composant les blocs C.0
+Commentaires
+(𝜆 octets)
+Figure 2.3 : Structure du contenu d’un bloc C.
+7
+2.4 Bloc de données D
+Les blocs D contiennent les données des pixels de l’image. Leurs contenus doivent
+être concaténés pour obtenir un bitmap de l’image.
+Le codage des pixels dépend de la catégorie. Pour la catégorie “NEB” (pixels noirs
+et blancs), chaque pixel doit être codé sur un bit (1 pour noir, 0 pour blanc). Les
+autres types de pixels sont décris plus tard.
+Les pixels sont rangés de gauche à droite, puis de haut en bas. Un exemple est
+donné dans la figure 2.4.𝑝0 𝑝1 𝑝2 𝑝3
+𝑝4 𝑝5 𝑝6 𝑝7
+𝑝8 𝑝9 𝑝10 𝑝11
+𝑝12 𝑝13 𝑝14 𝑝15
+𝑝16 𝑝17 𝑝18 𝑝19
+𝑝20 𝑝21 𝑝22 𝑝23
+Bloc D0 Bloc D1 Bloc D2
+sens de lecture /
+écriture des pixels
+sens de lecture /
+écriture des lignes𝑝0 𝑝1 𝑝2 𝑝3
+𝑝4 𝑝5 𝑝6 𝑝7
+𝑝8 𝑝9 𝑝10 𝑝11
+𝑝12 𝑝13 𝑝14 𝑝15
+𝑝16 𝑝17 𝑝18 𝑝19
+𝑝20 𝑝21 𝑝22 𝑝23
+sens de lecture /
+écriture des pixels Bloc D0
+Figure 2.4 : Exemple de l’organisation des pixels sur une image de largeur 4 et de
+hauteur 6. À gauche, trois blocs D sont utilisés tandis qu’à droite, un unique bloc D
+est utilisé.
+Le contenu du bloc est décris dans le tableau 2.4 et la figure 2.5 ci-dessous.
+Offset Nom Taille Description
+0 Pixels λ octets Contenu des pixels pour un bloc
+Table 2.4 : Offset, nom, taille et description des champs composant les blocs D.0
+Pixels
+(𝜆 octets)
+Figure 2.5 : Structure du contenu d’un bloc D.
+8
+2.5 Exemple de résultat pour une image “noir et blanc”
+Un programme de lecture Mini-PNG consommant le fichier A.mp (disponible dans
+les échantillons) devrait afficher la sortie suivante dans le terminal :
+Largeur = 8
+Hauteur = 10
+Catégorie de pixel = 0
+Commentaires = La lettre A
+XXXX
+X X
+X X
+X X
+X X
+XXXXXXXX
+X X
+X X
+X X
+X X
+9
+Partie 3
+Étapes
+Étapes avant de commencer
+1. Démarrer votre poste de travail sous Linux
+2. Prenez une feuille et un crayon
+3. Ouvrez un éditeur de texte ([N]Vim ou VS Code)
+4. Clonez votre répertoire git de la forge, et placez vous dans un sous dossier
+projet-Mini-PNG.
+Tout est faisable sur votre session UBS (ou machine personnelle). Faites des com-
+mit Git réguliers et poussez (push) votre travail dans votre dépôt Git sur la forge en
+fin de séance. Le travail en dehors des heures de cours est requis.
+N’oubliez pas de lire le manuel pour les fonctions C inconnues. Vous avez le droit
+de vous entraidez, mais la production doit rester un travail personnel. Méfiez-vous
+des forums. L’usage des LLMs est proscrit, veuillez solliciter les intervenants, qui
+peuvent vous aider. Le constat d’usage de LLMs sera considérer comme un refus
+définitif de l’aide des intervenants.
+3.1 Lire un fichier Mini-PNG
+Rappel : l’introduction de ce sujet comporte des indications sur la manière dont
+votre programme doit se comporter. Merci de les lire, de les analyser et de les relire !
+Les étapes vous guides, mais ceci reste un projet ; les étapes ne se substituent pas à
+une prise générale de recul.
+3.1.1 Q1 : Analyseur Mini-PNG (parser)
+Écrivez un parser lisant un fichier au format Mini-PNG et affichant les informations
+le concernant, c.-à-d. :
+• largeur de l’image ;
+• hauteur de l’image ;
+10
+• catégorie des pixels.
+Voici ce qui est attendu pour l’appel de votre programme sur le fichier A.mp :
+$ ./programme A.mp
+Largeur = 8
+Hauteur = 10
+Catégorie de pixel = 0
+3.1.2 Q2 : Analyse avancée
+Améliorez votre programme pour qu’il affiche également les commentaires pré-
+sents dans le fichier.
+La sortie attendue du programme pour A.mp est le suivant :
+$ ./programme A.mp
+Largeur = 8
+Hauteur = 10
+Catégorie de pixel = 0
+Commentaires = La lettre A
+3.1.3 Q3 : Vérification
+Consolidez votre programme en ajoutant une vérification de la quantité de don-
+nées. Si la quantité ne correspond pas à celle indiquée, le programme doit prévenir
+l’utilisateur et le système avec un code d’erreur répertorié.
+3.2 Afficher et écrire un Mini-PNG Noir et Blanc
+3.2.1 Q4 : Affichage
+Affichez l’image en mode texte, en affichant les pixels noirs comme des X et les
+pixels blancs comme des espaces. Le résultat attendu pour A.mp est donné dans la
+section 2.5.
+3.2.2 Q5 : Écriture
+Écrivez un fichier Mini-PNG valide représentant la première lettre de votre prénom
+(sauf si c’est un A, dans ce cas prenez la deuxième lettre du prénom).
+11
+3.2.3 Q6 : Génération
+Ajouter une option à votre programme lui permettant de prendre une lettre ma-
+juscule en argument et de générer le fichier Mini-PNG noir et blanc correspondant.
+Cette fonctionnalité sera activée si le premier argument est --mpfy. Le second ar-
+gument doit alors être la lettre à transformer.
+Ainsi, la sortie attendue du programme pour A est A.mp, c.-à-d. que les trois com-
+mandes suivantes :
+1 rm -rv A.mp # Supprime A.mp s'il existe
+2 ./programme --mpfy A
+3 ./programme A.mp
+doivent produire la même sortie que dans la section 2.5.
+3.3 Prise en charge des niveaux de gris
+En mode niveaux de gris, les pixels sont codés sur 1 octet (0x00 représentant le noir
+et 0xff le blanc).
+3.3.1 Q7 : Support des niveaux de gris
+Reprenez les questions de la section 3.1 en ajoutant le support de l’encodage en
+niveaux de gris.
+3.3.2 Q8 : Affichage et génération des niveaux de gris
+Reprenez les questions de la section 3.2 en ajoutant le support de l’encodage en
+niveaux de gris.
+Pour cela, notez qu’il existe des séquences d’échappement ANSI permettant d’af-
+ficher les couleurs 24-bits dans un terminal. Elles commencent par le caractère AS-
+CII 27 ("\033" en octal, "\x1b" en héxadécimal) suivi du crochet ouvrant "[", et
+se termine par un "m". La syntaxe complète est riche et bien détaillée sur la page an-
+glaise Wikipédia (voir https://en.wikipedia.org/wiki/ANSI_escape_code#).
+Pour pouvoir les utiliser, le terminal doit les supporter. Pour vérifier le support,
+vous pouvez utiliser le script shell ci-après.
+Script de test niveau de gris
+#! /bin/sh
+for i in $(seq 0 255); do
+RESET="\033[0m"
+FG="\033[38;2;${i};${i};${i}m"
+BG="\033[48;2;${i};${i};${i}m"
+printf "%3d - FG: $FG$%3d$RESET - BG: $BG%3s$RESET\n" \
+"$i" "$i" ""
+done; echo
+12
+3.4 Prise en charge des true colors 24-bits
+En mode couleurs 24-bits (aussi appelé true colors), les pixels sont codés sur 3 octets
+représentant les trois composantes RVB (Rouge, Vert, Bleu).
+3.4.1 Q9 : Support des true colors 24-bits
+Reprenez les questions de la section 3.1 en ajoutant le support de l’encodage en true
+colors 24-bits.
+3.4.2 Q10 : Affichage et génération des true colors 24-bits
+Reprenez les questions de la section 3.2 en ajoutant le support de l’encodage en true
+colors.
+Pour cela, appuyez-vous à nouveaux sur les codes ANSI introduits à la question
+3.3.2. Pour pouvoir les utiliser, le terminal doit les supporter. Pour vérifier le sup-
+port, vous pouvez utiliser les scripts shell ci-après.
+Script de test True Colors
+#! /bin/sh
+for r in $(seq 0 32 255) 255; do
+printf "\n%9sR = %3d:\n%6sB =%s\n" " " "$r" " " \
+"$(seq 0 32 255 | xargs printf "%4s") 255"
+for g in $(seq 0 32 255) 255; do
+printf "G = %3d: " "$g"
+for b in $(seq 0 32 255) 255; do
+RESET="\033[0m"
+BG="\033[48;2;${r};${g};${b}m"
+printf "$BG%4s$RESET" ""
+done; echo
+done
+done; echo
+13
+3.5 Prise en charge de palette 256 couleurs (difficile)
+Contexte
+Si l’affichage en true colors est pratique et facile à comprendre (description directe
+de la couleur en RGB), il est en revanche très contraignant pour le matériel infor-
+matique. En effet, il impose que la carte graphique (ou le processeur, en l’absence
+de celle-ci) puisse distinguer et afficher 224 couleurs, soit environ 17 millions de
+nuances différentes.
+Si, de nos jours, le matériel graphique d’un PC peut très facilement gérer cette
+charge, ce n’est pas forcément le cas de microcontrôleurs, et ce n’était pas le cas
+dans les années 70-80.
+Afin de palier au manque de mémoire, de puissance de calcul ou de bande pas-
+sante, l’idée est venue d’utiliser une palette contenant au plus 256 couleurs diffé-
+rentes.
+Dans le cadre de Mini-PNG, il est nécessaire de définir comment sont implémenté
+les blocs D dans le mode “P8C” et d’introduire un nouveau type de bloc, le bloc de
+palette P.
+Concernant les blocs D, les pixels y sont codés sur un octet. Cela représente l’in-
+dice d’une couleur de la palette définie dans le bloc P, décris ci-après.
+3.5.1 Bloc de palette P
+Le bloc de palette P décris une palette contenant n couleurs (n un entier dans l’inter-
+valle [1, 256]). Chaque couleur est associée à un entier croissant de 0 à n − 1. Le bloc P
+doit être placé directement avant le premier bloc D lorsque le mode de l’image vaut
+2 (“P8C”).
+Cela est représenté dans le tableau 3.1 et dans la figure 3.1.
+Offset Nom Taille Description
+0 Couleurs λ = n × 3 Couleurs 24-bits définies pour l’image.
+Table 3.1 : Offset, nom, taille et description des champs composant le bloc P.
+3.5.2 Q11 : Prise en charge de l’encodage 256-couleurs
+Reprenez les questions de la section 3.2 en ajoutant le support de l’encodage 256-
+couleurs à base de palette. Attention à bien vérifier les blocs…
+14
+0
+Couleurs prédéfinies
+(𝑛  3 octets)Figure 3.1 : Structure d’un bloc P
+3.5.3 Q12 : Affichage 256-couleurs et palette externe
+Reprenez les questions de la section 3.1 en ajoutant le support de l’encodage 256-
+couleurs à base de palette (indice : notez le parallèle avec les couleurs 24 bits). Enfin,
+ajoutez la possibilité de redéfinir les couleurs de la palette à l’exécution du pro-
+gramme.
+3.6 Prise en charge de la sérialisation (très difficile)
+Sur Internet, la bande passante ne permet pas d’obtenir instantanément toutes les
+données. Sérialiser une image permet de donner d’abord une image floue ou in-
+complète et de l’affiner petit-à-petit.
+3.6.1 Q13 : Affichage sérialisé
+Expliquer et implémenter une méthode permettant de sérialiser une image Mini-
+PNG.
+15
