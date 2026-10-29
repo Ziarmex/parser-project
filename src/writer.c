@@ -18,6 +18,11 @@ static int put_block(FILE* f, char type, const unsigned char* content, size_t le
 {
     unsigned char t = (unsigned char) type;
 
+    /* The length field is only 2 bytes: refuse what does not fit. */
+    if (len > UINT16_MAX) {
+        return -1;
+    }
+
     if (fwrite(&t, 1, 1, f) != 1) {
         return -1;
     }
@@ -30,9 +35,19 @@ static int put_block(FILE* f, char type, const unsigned char* content, size_t le
     return 0;
 }
 
+/* Black & white image: same as mpng_write() with category 0 (NEB). */
 int mpng_write_neb(const char* filename, uint32_t largeur, uint32_t hauteur,
                    const unsigned char* pixels, size_t pixels_len,
                    const char* comment)
+{
+    return mpng_write(filename, largeur, hauteur, 0, pixels, pixels_len,
+                      comment);
+}
+
+/* Generic writer: the category (0 = NEB, 1 = NVG...) goes in the H block. */
+int mpng_write(const char* filename, uint32_t largeur, uint32_t hauteur,
+               uint8_t categorie, const unsigned char* pixels,
+               size_t pixels_len, const char* comment)
 {
     FILE* f = fopen(filename, "wb");
     if (!f) {
@@ -46,7 +61,7 @@ int mpng_write_neb(const char* filename, uint32_t largeur, uint32_t hauteur,
         goto done;
     }
 
-    /* H block: largeur (4), hauteur (4), categorie (1) = NEB. */
+    /* H block: largeur (4), hauteur (4), categorie (1). */
     unsigned char h[9];
     h[0] = (unsigned char) (largeur & 0xff);
     h[1] = (unsigned char) ((largeur >> 8) & 0xff);
@@ -56,7 +71,7 @@ int mpng_write_neb(const char* filename, uint32_t largeur, uint32_t hauteur,
     h[5] = (unsigned char) ((hauteur >> 8) & 0xff);
     h[6] = (unsigned char) ((hauteur >> 16) & 0xff);
     h[7] = (unsigned char) ((hauteur >> 24) & 0xff);
-    h[8] = 0;
+    h[8] = categorie;
     if (put_block(f, 'H', h, sizeof(h)) != 0) {
         goto done;
     }

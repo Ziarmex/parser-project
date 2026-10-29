@@ -13,6 +13,11 @@
  *
  * Returns 0 on success, non-zero on error.
  */
+
+int mpng_write(const char* filename, uint32_t largeur, uint32_t hauteur,
+               uint8_t categorie, const unsigned char* pixels,
+               size_t pixels_len, const char* comment);
+
 int mpng_write_neb(const char* filename, uint32_t largeur, uint32_t hauteur,
                    const unsigned char* pixels, size_t pixels_len,
                    const char* comment);

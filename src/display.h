@@ -14,4 +14,6 @@
 void display_neb(uint32_t largeur, uint32_t hauteur,
                  const unsigned char* pixels, size_t pixels_len);
 
+void display_nvg(uint32_t largeur, uint32_t hauteur,
+                 const unsigned char* pixels, size_t pixels_len);                
 #endif /* DISPLAY_H */

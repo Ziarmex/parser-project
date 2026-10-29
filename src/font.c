@@ -41,3 +41,31 @@ const unsigned char* font_neb(char letter)
     }
     return FONT[letter - 'A'];
 }
+
+/*
+ * Grayscale (NVG) version of a letter, written into `out`
+ * (FONT_W * FONT_H bytes, one byte per pixel, 0x00 = black, 0xff = white).
+ * It starts from the black & white bitmap above and expands each bit into a
+ * byte: white pixels become 0xff, black pixels become a gray that gets lighter
+ * row after row (dark at the top, light at the bottom) so the levels are
+ * visible. Returns 0 on success, -1 if the letter is not supported.
+ */
+int font_nvg(char letter, unsigned char* out)
+{
+    const unsigned char* rows = font_neb(letter);
+    if (rows == NULL) {
+        return -1;
+    }
+
+    for (int y = 0; y < FONT_H; y++) {
+        /* Gray level of this row: 0, 20, 40 ... 180 (fits in one byte). */
+        unsigned char shade = (unsigned char) (y * 20);
+
+        for (int x = 0; x < FONT_W; x++) {
+            /* Leftmost pixel is the most significant bit of the row byte. */
+            int black = (rows[y] >> (7 - x)) & 1;
+            out[y * FONT_W + x] = black ? shade : 0xff;
+        }
+    }
+    return 0;
+}

@@ -14,4 +14,6 @@
  */
 const unsigned char* font_neb(char letter);
 
+int font_nvg(char letter, unsigned char* out);
+
 #endif /* FONT_H_INCLUDED */
