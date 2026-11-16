@@ -15,5 +15,15 @@ void display_neb(uint32_t largeur, uint32_t hauteur,
                  const unsigned char* pixels, size_t pixels_len);
 
 void display_nvg(uint32_t largeur, uint32_t hauteur,
-                 const unsigned char* pixels, size_t pixels_len);                
+                 const unsigned char* pixels, size_t pixels_len);
+
+/*
+ * Display a 24-bit colour (C24) image on stdout.
+ *
+ * pixels holds the concatenated contents of the D blocks: 3 bytes per pixel
+ * (red, green, blue), stored left to right then top to bottom.
+ */
+void display_c24(uint32_t largeur, uint32_t hauteur,
+                 const unsigned char* pixels, size_t pixels_len);
+
 #endif /* DISPLAY_H */

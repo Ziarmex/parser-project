@@ -23,20 +23,23 @@ static uint32_t read_le32(const unsigned char* p)
 
 int main(int argc, char* argv[])
 {
-    // Generate mode: ./main --mpfy <LETTER> [--nvg]
-    //   without --nvg: writes <LETTER>.mp      (black & white)
-    //   with --nvg:    writes <LETTER>_nvg.mp  (grayscale)
+    // Generate mode: ./main --mpfy <LETTER> [--nvg|--c24]
+    //   without option: writes <LETTER>.mp      (black & white)
+    //   with --nvg:     writes <LETTER>_nvg.mp  (grayscale)
+    //   with --c24:     writes <LETTER>_c24.mp  (true colours)
     if (argc >= 3 && strcmp(argv[1], "--mpfy") == 0) {
         int gray = (argc == 4 && strcmp(argv[3], "--nvg") == 0);
-        if (argc > 4 || (argc == 4 && !gray) || argv[2][1] != '\0') {
-            fprintf(stderr, "Usage: %s --mpfy <LETTER> [--nvg]\n", argv[0]);
+        int color = (argc == 4 && strcmp(argv[3], "--c24") == 0);
+        if (argc > 4 || (argc == 4 && !gray && !color) || argv[2][1] != '\0') {
+            fprintf(stderr, "Usage: %s --mpfy <LETTER> [--nvg|--c24]\n", argv[0]);
             return EXIT_FAILURE;
         }
 
         char letter = argv[2][0];
         char filename[16];
         char comment[32];
-        snprintf(filename, sizeof(filename), gray ? "%c_nvg.mp" : "%c.mp", letter);
+        const char* suffix = gray ? "_nvg.mp" : (color ? "_c24.mp" : ".mp");
+        snprintf(filename, sizeof(filename), "%c%s", letter, suffix);
         snprintf(comment, sizeof(comment), "La lettre %c", letter);
 
         int rc;
@@ -47,6 +50,13 @@ int main(int argc, char* argv[])
                 return EXIT_FAILURE;
             }
             rc = mpng_write(filename, FONT_W, FONT_H, 1, bitmap, sizeof(bitmap), comment);
+        } else if (color) {
+            unsigned char bitmap[FONT_W * FONT_H * 3];
+            if (font_c24(letter, bitmap) != 0) {
+                fprintf(stderr, "Unsupported letter: %c\n", letter);
+                return EXIT_FAILURE;
+            }
+            rc = mpng_write(filename, FONT_W, FONT_H, 2, bitmap, sizeof(bitmap), comment);
         } else {
             const unsigned char* bitmap = font_neb(letter);
             if (bitmap == NULL) {
@@ -65,7 +75,7 @@ int main(int argc, char* argv[])
 
     if (argc != 2) {
         fprintf(stderr, "Usage: %s <file.mp>\n", argv[0]);
-        fprintf(stderr, "       %s --mpfy <LETTER> [--nvg]\n", argv[0]);
+        fprintf(stderr, "       %s --mpfy <LETTER> [--nvg|--c24]\n", argv[0]);
         return EXIT_FAILURE;
     }
 
@@ -177,11 +187,26 @@ int main(int argc, char* argv[])
 
     // Check the amount of pixel data against the header (uint64_t so that
     // largeur * hauteur cannot overflow).
-    //   NEB: 1 bit per pixel  -> ceil(w * h / 8) bytes
-    //   NVG: 1 byte per pixel -> w * h bytes
-    if (categorie == 0 || categorie == 1) {
+    //   NEB: 1 bit per pixel   -> ceil(w * h / 8) bytes
+    //   NVG: 1 byte per pixel  -> w * h bytes
+    //   C24: 3 bytes per pixel -> 3 * w * h bytes
+    if (categorie == 0 || categorie == 1 || categorie == 2) {
         uint64_t nb_pixels = (uint64_t) largeur * hauteur;
-        uint64_t expected = categorie == 0 ? (nb_pixels + 7) / 8 : nb_pixels;
+        uint64_t expected;
+
+        if (categorie == 0) {
+            expected = (nb_pixels + 7) / 8;
+        } else if (categorie == 1) {
+            expected = nb_pixels;
+        } else {
+            if (nb_pixels > UINT64_MAX / 3) {
+                fprintf(stderr, "Image too large\n");
+                free(pixels);
+                free(data);
+                return EXIT_FAILURE;
+            }
+            expected = nb_pixels * 3;
+        }
 
         if (pixels_len != expected) {
             fprintf(stderr, "Wrong amount of pixel data: expected %llu bytes, got %zu\n",
@@ -196,6 +221,8 @@ int main(int argc, char* argv[])
         display_neb(largeur, hauteur, pixels, pixels_len);
     } else if (categorie == 1) {
         display_nvg(largeur, hauteur, pixels, pixels_len);
+    } else if (categorie == 2) {
+        display_c24(largeur, hauteur, pixels, pixels_len);
     }
 
     free(pixels);

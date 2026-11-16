@@ -6,4 +6,4 @@ bin/
 .idea/
 
 # Generated output (created by --mpfy)
-/[A-Z].mp
+/*.mp

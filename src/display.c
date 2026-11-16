@@ -55,3 +55,32 @@ void display_nvg(uint32_t largeur, uint32_t hauteur,
 }
 
 
+void display_c24(uint32_t largeur, uint32_t hauteur,
+                 const unsigned char* pixels, size_t pixels_len)
+{
+    if (largeur == 0) {
+        return;
+    }
+
+    for (uint32_t y = 0; y < hauteur; y++) {
+        for (uint32_t x = 0; x < largeur; x++) {
+            size_t index = ((size_t) y * largeur + x) * 3;
+
+            if (index + 2 >= pixels_len) {      /* never read past the buffer */
+                printf("\x1b[0m\n");
+                return;
+            }
+
+            unsigned int r = pixels[index];
+            unsigned int g = pixels[index + 1];
+            unsigned int b = pixels[index + 2];
+
+            /* ESC[48;2;R;G;Bm = set background to the pixel colour */
+            printf("\x1b[48;2;%u;%u;%um  ", r, g, b);
+        }
+        /* ESC[0m = reset colours so the end of the line is not coloured */
+        printf("\x1b[0m\n");
+    }
+}
+
+

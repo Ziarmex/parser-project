@@ -69,3 +69,30 @@ int font_nvg(char letter, unsigned char* out)
     }
     return 0;
 }
+
+/*
+ * True colour (C24) version of a letter, written into `out`
+ * (FONT_W * FONT_H * 3 bytes). White pixels stay white, black pixels get a
+ * colour that varies with their position: red fades down, green grows to the
+ * right and blue grows down. Returns 0 on success, -1 if not supported.
+ */
+int font_c24(char letter, unsigned char* out)
+{
+    const unsigned char* rows = font_neb(letter);
+    if (rows == NULL) {
+        return -1;
+    }
+
+    for (int y = 0; y < FONT_H; y++) {
+        for (int x = 0; x < FONT_W; x++) {
+            /* Leftmost pixel is the most significant bit of the row byte. */
+            int black = (rows[y] >> (7 - x)) & 1;
+            unsigned char* p = out + ((size_t) y * FONT_W + x) * 3;
+
+            p[0] = black ? (unsigned char) (255 - y * 20) : 255;
+            p[1] = black ? (unsigned char) (x * 32) : 255;
+            p[2] = black ? (unsigned char) (y * 20) : 255;
+        }
+    }
+    return 0;
+}
