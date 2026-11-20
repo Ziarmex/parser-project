@@ -49,7 +49,12 @@ int mpng_write(const char* filename, uint32_t largeur, uint32_t hauteur,
                uint8_t categorie, const unsigned char* pixels,
                size_t pixels_len, const char* comment)
 {
-    FILE* f = fopen(filename, "wb");
+    // "x" = exclusive create (O_CREAT | O_EXCL): fail if the path already
+    // exists. That also refuses to follow a symlink, so a planted
+    // "A.mp -> /some/important/file" can never be truncated. We return
+    // here without touching the path, so we only ever delete a file we
+    // created ourselves (see the cleanup below).
+    FILE* f = fopen(filename, "wbx");
     if (!f) {
         perror(filename);
         return -1;
@@ -91,6 +96,10 @@ int mpng_write(const char* filename, uint32_t largeur, uint32_t hauteur,
 done:
     if (fclose(f) != 0) {
         rc = -1;
+    }
+    // Do not leave a truncated / half-written file behind.
+    if (rc != 0) {
+        remove(filename);
     }
     return rc;
 }

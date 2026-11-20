@@ -1,76 +1,194 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include <stdint.h>
+#include <sys/stat.h>
 
 #include "display.h"
 #include "font.h"
+#include "parser.h"
 #include "writer.h"
 
-// Read a 16-bit / 32-bit little-endian value byte by byte. Unlike a pointer
-// cast, this is safe on unaligned addresses and gives the same result on
-// every CPU (x86_64, ARM, big-endian...).
-static uint16_t read_le16(const unsigned char* p)
+// Largest input file we accept (64 MiB). The whole file is loaded in memory,
+// so without a cap a huge file would exhaust RAM.
+#define MAX_FILE_SIZE ((off_t) 64 * 1024 * 1024)
+
+// Generate mode: ./main --mpfy <LETTER> [--nvg|--c24]
+//   without option: writes <LETTER>.mp      (black & white)
+//   with --nvg:     writes <LETTER>_nvg.mp  (grayscale)
+//   with --c24:     writes <LETTER>_c24.mp  (true colours)
+static int run_mpfy(int argc, char* argv[])
 {
-    return (uint16_t) (p[0] | (p[1] << 8));
+    int gray = (argc == 4 && strcmp(argv[3], "--nvg") == 0);
+    int color = (argc == 4 && strcmp(argv[3], "--c24") == 0);
+    // argv[2] must be exactly one character: check [0] before [1], so an
+    // empty string never makes us read past its terminating NUL.
+    if (argc > 4 || (argc == 4 && !gray && !color) || argv[2][0] == '\0'
+        || argv[2][1] != '\0') {
+        fprintf(stderr, "Usage: %s --mpfy <LETTER> [--nvg|--c24]\n", argv[0]);
+        return EXIT_FAILURE;
+    }
+
+    char letter = argv[2][0];
+    char filename[16];
+    char comment[32];
+    const char* suffix = gray ? "_nvg.mp" : (color ? "_c24.mp" : ".mp");
+    snprintf(filename, sizeof(filename), "%c%s", letter, suffix);
+    snprintf(comment, sizeof(comment), "La lettre %c", letter);
+
+    int rc;
+    if (gray) {
+        unsigned char bitmap[FONT_W * FONT_H];
+        if (font_nvg(letter, bitmap) != 0) {
+            fprintf(stderr, "Unsupported letter: %c\n", letter);
+            return EXIT_FAILURE;
+        }
+        rc = mpng_write(filename, FONT_W, FONT_H, 1, bitmap, sizeof(bitmap), comment);
+    } else if (color) {
+        unsigned char bitmap[FONT_W * FONT_H * 3];
+        if (font_c24(letter, bitmap) != 0) {
+            fprintf(stderr, "Unsupported letter: %c\n", letter);
+            return EXIT_FAILURE;
+        }
+        rc = mpng_write(filename, FONT_W, FONT_H, 2, bitmap, sizeof(bitmap), comment);
+    } else {
+        const unsigned char* bitmap = font_neb(letter);
+        if (bitmap == NULL) {
+            fprintf(stderr, "Unsupported letter: %c\n", letter);
+            return EXIT_FAILURE;
+        }
+        rc = mpng_write_neb(filename, FONT_W, FONT_H, bitmap, FONT_H, comment);
+    }
+
+    if (rc != 0) {
+        fprintf(stderr, "Failed to write %s\n", filename);
+        return EXIT_FAILURE;
+    }
+    return EXIT_SUCCESS;
 }
 
-static uint32_t read_le32(const unsigned char* p)
+// Read a whole regular file into a freshly allocated buffer.
+// Returns 0 and hands the buffer to the caller (who must free it), or -1
+// after printing an error; nothing is left allocated or open on failure.
+static int load_file(const char* path, unsigned char** buf_out, size_t* len_out)
 {
-    return (uint32_t) p[0] | ((uint32_t) p[1] << 8) | ((uint32_t) p[2] << 16)
-           | ((uint32_t) p[3] << 24);
+    int rc = -1;
+    FILE* file = NULL;
+    unsigned char* buf = NULL;
+    struct stat st;
+    size_t size;
+
+    file = fopen(path, "rb");
+    if (!file) {
+        perror(path);
+        goto cleanup;
+    }
+
+    // Ask the OS what we opened. fopen() succeeds on a directory, and ftell()
+    // on one gives a huge bogus size, so insist on a regular file.
+    if (fstat(fileno(file), &st) != 0) {
+        perror("fstat");
+        goto cleanup;
+    }
+    if (!S_ISREG(st.st_mode)) {
+        fprintf(stderr, "%s: not a regular file\n", path);
+        goto cleanup;
+    }
+    if (st.st_size > MAX_FILE_SIZE) {
+        fprintf(stderr, "%s: file too large (max %lld bytes)\n", path,
+                (long long) MAX_FILE_SIZE);
+        goto cleanup;
+    }
+
+    size = (size_t) st.st_size;
+
+    // malloc(0) may return NULL, which would look like an allocation failure.
+    // An empty buffer is fine: the parser rejects it as "not a Mini-PNG".
+    buf = malloc(size > 0 ? size : 1);
+    if (!buf) {
+        perror("malloc");
+        goto cleanup;
+    }
+
+    if (fread(buf, 1, size, file) != size) {
+        perror("fread");
+        goto cleanup;
+    }
+
+    *buf_out = buf;
+    *len_out = size;
+    buf = NULL; // ownership passed to the caller
+    rc = 0;
+
+cleanup:
+    free(buf);
+    if (file) {
+        fclose(file);
+    }
+    return rc;
+}
+
+static void report_parse_error(enum mpng_status st, const struct mpng* img)
+{
+    switch (st) {
+    case MPNG_OK:
+        break;
+    case MPNG_ERR_MAGIC:
+        fprintf(stderr, "Not a Mini-PNG file\n");
+        break;
+    case MPNG_ERR_TRUNCATED:
+        fprintf(stderr, "Truncated block '%c'\n", img->diag.block_type);
+        break;
+    case MPNG_ERR_HEADER_SHORT:
+        fprintf(stderr, "H block too short\n");
+        break;
+    case MPNG_ERR_COMMENT_CHARS:
+        fprintf(stderr, "C block contains a non-printable byte\n");
+        break;
+    case MPNG_ERR_TOO_LARGE:
+        fprintf(stderr, "Image too large\n");
+        break;
+    case MPNG_ERR_PIXEL_COUNT:
+        fprintf(stderr, "Wrong amount of pixel data: expected %llu bytes, got %zu\n",
+                (unsigned long long) img->diag.expected, img->diag.got);
+        break;
+    case MPNG_ERR_NOMEM:
+        fprintf(stderr, "Out of memory\n");
+        break;
+    }
+}
+
+static void print_image(const struct mpng* img)
+{
+    if (img->has_header) {
+        printf("Largeur = %u\n", img->largeur);
+        printf("Hauteur = %u\n", img->hauteur);
+        printf("Catégorie de pixel = %u\n", img->categorie);
+    }
+
+    for (size_t i = 0; i < img->n_comments; i++) {
+        printf("Commentaires = %.*s\n", (int) img->comments[i].len,
+               (const char*) img->comments[i].text);
+    }
+
+    switch (img->categorie) {
+    case MPNG_CAT_NEB:
+        display_neb(img->largeur, img->hauteur, img->pixels, img->pixels_len);
+        break;
+    case MPNG_CAT_NVG:
+        display_nvg(img->largeur, img->hauteur, img->pixels, img->pixels_len);
+        break;
+    case MPNG_CAT_C24:
+        display_c24(img->largeur, img->hauteur, img->pixels, img->pixels_len);
+        break;
+    default:
+        break;
+    }
 }
 
 int main(int argc, char* argv[])
 {
-    // Generate mode: ./main --mpfy <LETTER> [--nvg|--c24]
-    //   without option: writes <LETTER>.mp      (black & white)
-    //   with --nvg:     writes <LETTER>_nvg.mp  (grayscale)
-    //   with --c24:     writes <LETTER>_c24.mp  (true colours)
     if (argc >= 3 && strcmp(argv[1], "--mpfy") == 0) {
-        int gray = (argc == 4 && strcmp(argv[3], "--nvg") == 0);
-        int color = (argc == 4 && strcmp(argv[3], "--c24") == 0);
-        if (argc > 4 || (argc == 4 && !gray && !color) || argv[2][1] != '\0') {
-            fprintf(stderr, "Usage: %s --mpfy <LETTER> [--nvg|--c24]\n", argv[0]);
-            return EXIT_FAILURE;
-        }
-
-        char letter = argv[2][0];
-        char filename[16];
-        char comment[32];
-        const char* suffix = gray ? "_nvg.mp" : (color ? "_c24.mp" : ".mp");
-        snprintf(filename, sizeof(filename), "%c%s", letter, suffix);
-        snprintf(comment, sizeof(comment), "La lettre %c", letter);
-
-        int rc;
-        if (gray) {
-            unsigned char bitmap[FONT_W * FONT_H];
-            if (font_nvg(letter, bitmap) != 0) {
-                fprintf(stderr, "Unsupported letter: %c\n", letter);
-                return EXIT_FAILURE;
-            }
-            rc = mpng_write(filename, FONT_W, FONT_H, 1, bitmap, sizeof(bitmap), comment);
-        } else if (color) {
-            unsigned char bitmap[FONT_W * FONT_H * 3];
-            if (font_c24(letter, bitmap) != 0) {
-                fprintf(stderr, "Unsupported letter: %c\n", letter);
-                return EXIT_FAILURE;
-            }
-            rc = mpng_write(filename, FONT_W, FONT_H, 2, bitmap, sizeof(bitmap), comment);
-        } else {
-            const unsigned char* bitmap = font_neb(letter);
-            if (bitmap == NULL) {
-                fprintf(stderr, "Unsupported letter: %c\n", letter);
-                return EXIT_FAILURE;
-            }
-            rc = mpng_write_neb(filename, FONT_W, FONT_H, bitmap, FONT_H, comment);
-        }
-
-        if (rc != 0) {
-            fprintf(stderr, "Failed to write %s\n", filename);
-            return EXIT_FAILURE;
-        }
-        return EXIT_SUCCESS;
+        return run_mpfy(argc, argv);
     }
 
     if (argc != 2) {
@@ -79,153 +197,27 @@ int main(int argc, char* argv[])
         return EXIT_FAILURE;
     }
 
-    FILE* file = fopen(argv[1], "rb");
-    if (!file) {
-        perror(argv[1]);
-        return EXIT_FAILURE;
+    int rc = EXIT_FAILURE;
+    unsigned char* buf = NULL;
+    size_t len = 0;
+    struct mpng img = {0}; // zeroed so mpng_free() is safe on every path
+    enum mpng_status st;
+
+    if (load_file(argv[1], &buf, &len) != 0) {
+        goto cleanup;
     }
 
-    if (fseek(file, 0, SEEK_END) != 0) {
-        perror("fseek");
-        fclose(file);
-        return EXIT_FAILURE;
+    st = mpng_parse(buf, len, &img);
+    if (st != MPNG_OK) {
+        report_parse_error(st, &img);
+        goto cleanup;
     }
 
-    long file_size = ftell(file);
-    if (file_size < 0) {
-        perror("ftell");
-        fclose(file);
-        return EXIT_FAILURE;
-    }
+    print_image(&img);
+    rc = EXIT_SUCCESS;
 
-    rewind(file);
-
-    void* data = malloc((size_t) file_size);
-    if (!data) {
-        perror("malloc");
-        fclose(file);
-        return EXIT_FAILURE;
-    }
-
-    if (fread(data, 1, (size_t) file_size, file) != (size_t) file_size) {
-        perror("fread");
-        free(data);
-        fclose(file);
-        return EXIT_FAILURE;
-    }
-
-    fclose(file);
-
-    // 8-byte magic number, must be "Mini-PNG"
-    if (file_size < 8 || memcmp(data, "Mini-PNG", 8) != 0) {
-        fprintf(stderr, "Not a Mini-PNG file\n");
-        free(data);
-        return EXIT_FAILURE;
-    }
-
-    uint32_t largeur = 0;
-    uint32_t hauteur = 0;
-    uint8_t categorie = 0;
-
-    // Pixels of every D block, concatenated.
-    unsigned char* pixels = NULL;
-    size_t pixels_len = 0;
-
-    // Walk the blocks one by one.
-    // Each block is [type:1 byte][lambda:2 bytes][content:lambda bytes].
-    // The first block starts right after the 8-byte magic number.
-    size_t offset = 8;
-
-    while (offset + 3 <= (size_t) file_size) {
-        const unsigned char* block = (const unsigned char*) data + offset;
-        char type = (char) block[0];
-        uint16_t lambda = read_le16(block + 1);
-        const unsigned char* content = block + 3;
-
-        // The block must fit inside the file, otherwise we would read
-        // (and copy) bytes that are past the end of the buffer.
-        if ((size_t) lambda > (size_t) file_size - offset - 3) {
-            fprintf(stderr, "Truncated block '%c'\n", type);
-            free(pixels);
-            free(data);
-            return EXIT_FAILURE;
-        }
-
-        if (type == 'H') {
-            // The H block holds 4 + 4 + 1 = 9 bytes.
-            if (lambda < 9) {
-                fprintf(stderr, "H block too short\n");
-                free(pixels);
-                free(data);
-                return EXIT_FAILURE;
-            }
-
-            largeur = read_le32(content);
-            hauteur = read_le32(content + 4);
-            categorie = content[8];
-
-            printf("Largeur = %u\n", largeur);
-            printf("Hauteur = %u\n", hauteur);
-            printf("Catégorie de pixel = %u\n", categorie);
-        } else if (type == 'C') {
-            printf("Commentaires = %.*s\n", (int) lambda, (char*) content);
-        } else if (type == 'D') {
-            unsigned char* tmp = realloc(pixels, pixels_len + lambda);
-            if (!tmp) {
-                perror("realloc");
-                free(pixels);
-                free(data);
-                return EXIT_FAILURE;
-            }
-            pixels = tmp;
-            memcpy(pixels + pixels_len, content, lambda);
-            pixels_len += lambda;
-        }
-
-        offset += 3 + lambda;
-    }
-
-    // Check the amount of pixel data against the header (uint64_t so that
-    // largeur * hauteur cannot overflow).
-    //   NEB: 1 bit per pixel   -> ceil(w * h / 8) bytes
-    //   NVG: 1 byte per pixel  -> w * h bytes
-    //   C24: 3 bytes per pixel -> 3 * w * h bytes
-    if (categorie == 0 || categorie == 1 || categorie == 2) {
-        uint64_t nb_pixels = (uint64_t) largeur * hauteur;
-        uint64_t expected;
-
-        if (categorie == 0) {
-            expected = (nb_pixels + 7) / 8;
-        } else if (categorie == 1) {
-            expected = nb_pixels;
-        } else {
-            if (nb_pixels > UINT64_MAX / 3) {
-                fprintf(stderr, "Image too large\n");
-                free(pixels);
-                free(data);
-                return EXIT_FAILURE;
-            }
-            expected = nb_pixels * 3;
-        }
-
-        if (pixels_len != expected) {
-            fprintf(stderr, "Wrong amount of pixel data: expected %llu bytes, got %zu\n",
-                    (unsigned long long) expected, pixels_len);
-            free(pixels);
-            free(data);
-            return EXIT_FAILURE;
-        }
-    }
-
-    if (categorie == 0) {
-        display_neb(largeur, hauteur, pixels, pixels_len);
-    } else if (categorie == 1) {
-        display_nvg(largeur, hauteur, pixels, pixels_len);
-    } else if (categorie == 2) {
-        display_c24(largeur, hauteur, pixels, pixels_len);
-    }
-
-    free(pixels);
-    free(data);
-    return EXIT_SUCCESS;
+cleanup:
+    mpng_free(&img);
+    free(buf);
+    return rc;
 }
